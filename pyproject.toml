@@ -1,0 +1,35 @@
+[project]
+name = "melog"
+version = "0.1.0"
+description = "ML-Experiment-Log"
+readme = "README.md"
+authors = [
+    { name = "BangJunSeok", email = "bangjunseok2005@naver.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "typer>=0.28.0",
+]
+
+[project.scripts]
+melog = "melog:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.4",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
