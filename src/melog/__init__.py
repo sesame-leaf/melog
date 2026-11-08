@@ -1,2 +1,1 @@
-def main() -> None:
-    print("Hello from melog!")
+"""melog: record every ML experiment in a structured form."""
