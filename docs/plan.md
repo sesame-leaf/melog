@@ -32,7 +32,7 @@
 
 각 단계가 끝날 때마다 실제로 쓸 수 있는 상태가 되도록 나눴습니다.
 
-- [ ] **1. 기반**: `git.py`, `store.py`, `project.py`, `melog init`, `melog project edit`(옵션 방식)
+- [x] **1. 기반**: `git.py`, `store.py`, `project.py`, `melog init`, `melog project edit`(옵션 방식)
   - 이 단계 이후: melog 프로젝트를 만들고 설정할 수 있습니다.
 - [ ] **2. 핵심 기록**: `snapshot.py`, `record.py`, `ids.py`, `workspace.py`, `start`, `done`(`--new` 포함), `abandon`, `show`, `list`
   - 이 단계 이후: 혼자서 실험을 기록할 수 있습니다. 처음으로 실제 사용이 가능한 단계입니다.
