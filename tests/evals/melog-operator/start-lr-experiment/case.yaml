@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: start-lr-experiment
+expected_outcome: |
+  The agent starts a melog experiment before editing the code, with bjs-1 as its parent and the user's own motivation (the Discussion tip about lowering the learning rate), then sets LEARNING_RATE to 0.05 in train.py. It records no scores or verdict yet.
+context:
+  scaffold_script: setup.sh

@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: sync-conflict-asks-user
+expected_outcome: |
+  Syncing hits a conflict: the local verdict of bjs-1 is '베이스라인으로 확정' and the teammate's is 'fold를 늘려서 다시 확인해야 함'. The agent does not settle it with --prefer on its own; it shows both values and asks which to keep, and nothing changes meanwhile.
+context:
+  scaffold_script: setup.sh

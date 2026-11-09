@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: finish-with-cv-score
+expected_outcome: |
+  The agent finishes the experiment in progress (bjs-2) with CV 0.823, without inventing a CV std from the fold range or a verdict. It drafts the 변경점 (learning rate 0.1 to 0.05) from melog diff and shows it to the user for confirmation instead of recording it unasked.
+context:
+  scaffold_script: setup.sh

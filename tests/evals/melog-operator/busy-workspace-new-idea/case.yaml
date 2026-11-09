@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: busy-workspace-new-idea
+expected_outcome: |
+  bjs-2 is in progress in this workspace, so a second experiment cannot start here. The agent does not finish or abandon bjs-2 without the user, and either starts the feature selection experiment in a separate worktree or asks the user to choose between ending bjs-2 and using a separate worktree.
+context:
+  scaffold_script: setup.sh
