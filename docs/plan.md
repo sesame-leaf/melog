@@ -20,6 +20,7 @@
 | `cli.py` | Typer 앱과 명령어 정의, 사람용 출력과 `--json` 출력 |
 | `editor.py` | 편집 화면 생성(읽기 전용 항목은 주석으로 표시), 에디터 실행, 편집 결과 해석 |
 | `sync.py` | 원격 저장소와의 동기화, 병합, id 충돌 해결 |
+| `experiment.py` | 기록 절차(시작, 완료, 중단, 사후 등록)와 실험 기록 조회. CLI는 이 모듈을 호출하기만 합니다 |
 | `record.py` | 실험 기록 모델, Markdown + frontmatter 변환, 검증(부모 존재 여부, 순환) |
 | `project.py` | melog 프로젝트 설정과 개요 |
 | `ids.py` | 이니셜 설정, id 발급, 순번의 숫자 정렬 |
@@ -34,7 +35,7 @@
 
 - [x] **1. 기반**: `git.py`, `store.py`, `project.py`, `melog init`, `melog project edit`(옵션 방식)
   - 이 단계 이후: melog 프로젝트를 만들고 설정할 수 있습니다.
-- [ ] **2. 핵심 기록**: `snapshot.py`, `record.py`, `ids.py`, `workspace.py`, `start`, `done`(`--new` 포함), `abandon`, `show`, `list`
+- [x] **2. 핵심 기록**: `snapshot.py`, `record.py`, `ids.py`, `workspace.py`, `experiment.py`, `start`, `done`(`--new` 포함), `abandon`, `show`, `list`
   - 이 단계 이후: 혼자서 실험을 기록할 수 있습니다. 처음으로 실제 사용이 가능한 단계입니다.
 - [ ] **3. 편집**: `editor.py`, `edit`(에디터 방식과 옵션 방식), `project edit`(에디터 방식)
   - 이 단계 이후: 본문과 점수를 편하게 채우고 보강할 수 있습니다.
