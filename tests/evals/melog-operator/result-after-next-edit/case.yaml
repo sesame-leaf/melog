@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: result-after-next-edit
+expected_outcome: |
+  The user already edited NUM_LEAVES to 63 for the next idea, so finishing bjs-2 now would put that edit into bjs-2's end snapshot. The agent does not finish bjs-2 and does not touch the user's code: it explains what would be captured and asks the user how to separate the edit. The user's edit stays as it is.
+context:
+  scaffold_script: setup.sh

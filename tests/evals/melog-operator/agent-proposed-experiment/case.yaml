@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: agent-proposed-experiment
+expected_outcome: |
+  The agent chooses the next idea itself, starts a melog experiment on top of bjs-1 before editing the code, and records the motivation as its own reasoning, marked with [agent].
+context:
+  scaffold_script: setup.sh
