@@ -11,9 +11,11 @@ from melog.ids import id_sort_key, next_id, parse_id
 from melog.project import Project, load_project
 from melog.record import (
     MOTIVATION,
+    SECTIONS,
     Record,
     RecordError,
     dump_record,
+    find_cycle,
     now,
     parse_record,
     record_path,
@@ -385,3 +387,107 @@ def register(
         keep(repo, snapshot_ref(project_name, record.id, "start"), start_commit)
     keep(repo, snapshot_ref(project_name, record.id, "end"), snapshot.commit)
     return Outcome(record, snapshot.large_files)
+
+
+# Editing
+
+
+class EditConflictError(ExperimentError):
+    def __init__(self, exp_id: str, fields: list[str]) -> None:
+        self.fields = fields
+        super().__init__(
+            f"{exp_id!r} was changed elsewhere while you were editing it, in the same "
+            f"places you changed: {', '.join(fields)}"
+        )
+
+
+class InvalidParentError(ExperimentError):
+    """A parent would point at the experiment itself or close a cycle."""
+
+
+def _fields(record: Record) -> dict[str, object]:
+    """The user-editable parts of a record, each compared on its own when merging."""
+    fields: dict[str, object] = {
+        "title": record.title,
+        "parents": tuple(record.parents),
+        "entry_points": tuple(record.entry_points),
+        "verdict": record.verdict,
+    }
+    for name, value in record.scores.items():
+        fields[f"scores.{name}"] = value
+    for name in SECTIONS:
+        fields[f"body.{name}"] = record.section(name)
+    return fields
+
+
+_MISSING = object()
+
+
+def _set_field(record: Record, key: str, value: object) -> None:
+    if key.startswith("scores."):
+        name = key.removeprefix("scores.")
+        if value is _MISSING:
+            record.scores.pop(name, None)
+        else:
+            record.scores[name] = value  # type: ignore[assignment]
+    elif key.startswith("body."):
+        record.body[key.removeprefix("body.")] = value  # type: ignore[assignment]
+    elif key in ("parents", "entry_points"):
+        setattr(record, key, list(value))  # type: ignore[arg-type]
+    else:
+        setattr(record, key, value)
+
+
+def _check_edited(view: StoreView, project: str, record: Record) -> None:
+    _check_title(record.title)
+    if record.id in record.parents:
+        raise InvalidParentError(f"{record.id!r} cannot be its own parent")
+    _check_parents(view, project, record.parents)
+    parents_of = {r.id: r.parents for r in list_records(view, project)}
+    parents_of[record.id] = record.parents
+    cycle = find_cycle(parents_of)
+    if cycle:
+        raise InvalidParentError(
+            f"these parents would make a cycle: {' -> '.join(cycle)}"
+        )
+
+
+def edit(
+    store: Store, project: str, base: Record, edited: Record
+) -> tuple[Record, list[str]]:
+    """Apply the user's changes from ``base`` to ``edited`` onto the stored record.
+
+    Only the fields the user changed are applied, so concurrent changes to other
+    fields are kept. Returns the stored record and the changed field names.
+    """
+    before, after = _fields(base), _fields(edited)
+    changed = [
+        key
+        for key in dict.fromkeys([*before, *after])
+        if before.get(key, _MISSING) != after.get(key, _MISSING)
+    ]
+    if not changed:
+        return base, []
+    _check_edited(store.view(), project, edited)
+    result: list[Record] = []
+
+    def build(view: StoreView):
+        current = load_record(view, project, base.id)
+        now_fields = _fields(current)
+        conflicts = [
+            key
+            for key in changed
+            if now_fields.get(key, _MISSING) != before.get(key, _MISSING)
+            and now_fields.get(key, _MISSING) != after.get(key, _MISSING)
+        ]
+        if conflicts:
+            raise EditConflictError(base.id, conflicts)
+        for key in changed:
+            _set_field(current, key, after.get(key, _MISSING))
+        _check_edited(view, project, current)
+        result[:] = [current]
+        changes = {record_path(project, base.id): dump_record(current)}
+        return changes, f"edit {project}/{base.id}"
+
+    store.update(build)
+    return result[0], changed

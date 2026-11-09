@@ -63,13 +63,6 @@ def test_project_edit(repo_path: Path) -> None:
     }
 
 
-def test_project_edit_requires_options(repo_path: Path) -> None:
-    runner.invoke(app, ["init", "lgbm"])
-    result = runner.invoke(app, ["project", "edit"])
-    assert result.exit_code == 1
-    assert "--scores" in result.output
-
-
 def test_project_edit_with_several_projects(repo_path: Path) -> None:
     runner.invoke(app, ["init", "lgbm"])
     runner.invoke(app, ["init", "bert"])
@@ -252,3 +245,205 @@ def test_project_inferred_from_experiment_in_progress(
     result = invoke("done")
     assert result.exit_code == 0, result.output
     assert "(bert)" in result.output
+
+
+# Editing commands
+
+
+class FakeEditor:
+    """Stands in for the user's editor: each call applies the next edit."""
+
+    def __init__(self, *edits) -> None:
+        self.edits = list(edits)
+        self.seen: list[str] = []
+
+    def __call__(self, repo, path: Path) -> None:
+        text = path.read_text(encoding="utf-8")
+        self.seen.append(text)
+        path.write_text(self.edits.pop(0)(text), encoding="utf-8")
+
+
+@pytest.fixture
+def tty(monkeypatch) -> None:
+    monkeypatch.setattr("melog.cli._stdin_is_tty", lambda: True)
+
+
+def record_json(exp_id: str = "bjs-1") -> dict:
+    return json.loads(invoke("show", exp_id, "--json").output)["experiment"]
+
+
+def test_edit_with_options(repo_path: Path, project: str) -> None:
+    invoke("start", "a", "--motivation", "")
+    invoke("done")
+    invoke("start", "b")
+    result = invoke(
+        "edit",
+        "bjs-2",
+        "--title",
+        "b2",
+        "--parent",
+        "bjs-1",
+        "--entry",
+        "x.py",
+        "--score",
+        "CV=0.80",
+        "--score",
+        "public LB=",
+        "--verdict",
+        "ok",
+        "--changes",
+        "- lr",
+        "--json",
+    )
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["changed"] == [
+        "title",
+        "parents",
+        "entry_points",
+        "verdict",
+        "scores.CV",
+        "body.변경점",
+    ]
+    record = record_json("bjs-2")
+    assert record["title"] == "b2"
+    assert record["parents"] == ["bjs-1"]
+    assert record["scores"]["CV"] == "0.80"
+    assert record["body"]["변경점"] == "- lr"
+
+    result = invoke("edit", "--clear-parents", "--clear-entries", "--verdict", "")
+    assert result.exit_code == 0, result.output
+    assert result.output == "Updated bjs-2: parents, entry points, verdict\n"
+    assert invoke("edit", "--title", "b2").output == "No changes.\n"
+
+
+def test_edit_section_from_stdin(repo_path: Path, project: str) -> None:
+    invoke("start", "a", "--motivation", "")
+    result = invoke("edit", "--result", "-", input="CV 0.81\n\nfold 3 is low\n")
+    assert result.exit_code == 0, result.output
+    assert record_json()["body"]["결과"] == "CV 0.81\n\nfold 3 is low"
+
+
+@pytest.mark.parametrize(
+    "args, message",
+    [
+        (["edit", "bjs-1", "--parent", "bjs-1", "--clear-parents"], "cannot be used"),
+        (["edit", "bjs-1", "--memo", "-", "--result", "-"], "only one section"),
+        (["edit", "bjs-1"], "run in a terminal"),
+        (["edit", "--verdict", "x"], "pass the id of the experiment to edit"),
+        (["edit", "bjs-1", "--score", "CV=high"], "must be a number"),
+        (["edit", "bjs-1", "--parent", "bjs-1"], "own parent"),
+        (["edit", "bjs-9", "--verdict", "x"], "does not exist"),
+    ],
+)
+def test_edit_errors(repo_path: Path, project: str, args, message: str) -> None:
+    invoke("start", "a", "--motivation", "")
+    invoke("done")
+    result = invoke(*args)
+    assert result.exit_code == 1
+    assert message in result.output
+
+
+def test_edit_in_editor(repo_path: Path, project: str, tty, monkeypatch) -> None:
+    invoke("start", "a", "--motivation", "why")
+    editor = FakeEditor(
+        lambda t: t.replace("verdict:", "verdict: great").replace(
+            "## 변경점\n", "## 변경점\n\nmore trees\n"
+        )
+    )
+    monkeypatch.setattr("melog.cli.run_editor", editor)
+    result = invoke("edit")
+    assert result.exit_code == 0, result.output
+    assert result.output == "Updated bjs-1: verdict, 변경점\n"
+    assert "# melog: editing bjs-1 in project lgbm" in editor.seen[0]
+    record = record_json()
+    assert record["verdict"] == "great"
+    assert record["body"] == {
+        "동기와 예상": "why",
+        "변경점": "more trees",
+        "결과": "",
+        "메모": "",
+    }
+
+
+def test_edit_in_editor_unchanged_and_cancelled(
+    repo_path: Path, project: str, tty, monkeypatch
+) -> None:
+    invoke("start", "a", "--motivation", "")
+    monkeypatch.setattr("melog.cli.run_editor", FakeEditor(lambda t: t))
+    assert invoke("edit").output == "No changes.\n"
+    monkeypatch.setattr("melog.cli.run_editor", FakeEditor(lambda t: ""))
+    assert invoke("edit").output == "Edit cancelled.\n"
+
+
+def test_edit_in_editor_retries_invalid_edits(
+    repo_path: Path, project: str, tty, monkeypatch
+) -> None:
+    invoke("start", "a", "--motivation", "")
+    editor = FakeEditor(
+        lambda t: t.replace("verdict:", "verdic: typo"),
+        lambda t: t.replace("verdic: typo", "verdict: fixed"),
+    )
+    monkeypatch.setattr("melog.cli.run_editor", editor)
+    result = invoke("edit", input="y\n")
+    assert result.exit_code == 0, result.output
+    assert "unknown field 'verdic'" in result.output
+    # The second round reopens what the user typed, not the original record.
+    assert "verdic: typo" in editor.seen[1]
+    assert record_json()["verdict"] == "fixed"
+
+
+def test_edit_in_editor_keeps_text_when_giving_up(
+    repo_path: Path, project: str, tty, monkeypatch
+) -> None:
+    invoke("start", "a", "--motivation", "")
+    monkeypatch.setattr(
+        "melog.cli.run_editor", FakeEditor(lambda t: t.replace("verdict:", "x: 1"))
+    )
+    result = invoke("edit", input="n\n")
+    assert result.exit_code == 1
+    kept = Path(result.output.split("Your edit is kept in ")[1].strip())
+    assert "x: 1" in kept.read_text()
+    kept.unlink()
+
+
+def test_edit_in_editor_conflict(
+    repo_path: Path, project: str, tty, monkeypatch
+) -> None:
+    invoke("start", "a", "--motivation", "")
+
+    def change_meanwhile(text: str) -> str:
+        assert invoke("edit", "--verdict", "theirs").exit_code == 0
+        return text.replace("verdict:", "verdict: mine")
+
+    monkeypatch.setattr("melog.cli.run_editor", FakeEditor(change_meanwhile))
+    result = invoke("edit")
+    assert result.exit_code == 1
+    assert "was changed elsewhere" in result.output
+    kept = Path(result.output.split("Your edit is kept in ")[1].strip())
+    assert "verdict: mine" in kept.read_text()
+    kept.unlink()
+    assert record_json()["verdict"] == "theirs"
+
+
+def test_project_overview_in_editor(
+    repo_path: Path, project: str, tty, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "melog.cli.run_editor", FakeEditor(lambda t: "# Titanic\n\n5-fold CV\n")
+    )
+    result = invoke("project", "edit")
+    assert result.exit_code == 0, result.output
+    assert result.output == "Updated the overview of 'lgbm'.\n"
+    from melog.git import Repo
+    from melog.project import load_overview
+    from melog.store import Store
+
+    view = Store(Repo.discover(repo_path)).view()
+    assert load_overview(view, "lgbm") == "# Titanic\n\n5-fold CV\n"
+
+
+def test_project_edit_without_terminal(repo_path: Path, project: str) -> None:
+    result = invoke("project", "edit")
+    assert result.exit_code == 1
+    assert "run in a terminal" in result.output

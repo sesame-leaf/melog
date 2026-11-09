@@ -239,3 +239,77 @@ def test_list_records_is_chronological(
     experiment.register(repo, store, ws, "lgbm", "bjs", "retro", since="HEAD")
     ids = [r.id for r in experiment.list_records(store.view(), "lgbm")]
     assert ids == ["bjs-4", "bjs-1", "bjs-2", "bjs-3"]
+
+
+# Editing
+
+
+def edited_copy(record, **changes):
+    import copy
+
+    new = copy.deepcopy(record)
+    for key, value in changes.items():
+        setattr(new, key, value)
+    return new
+
+
+def test_edit_applies_changed_fields(repo: Repo, store: Store, ws, lgbm) -> None:
+    base = start(repo, store, ws)
+    new = edited_copy(base, verdict="nice")
+    new.scores["CV"] = "0.9"
+    new.body["변경점"] = "lr"
+    record, changed = experiment.edit(store, "lgbm", base, new)
+    assert changed == ["verdict", "scores.CV", "body.변경점"]
+    assert experiment.load_record(store.view(), "lgbm", base.id) == record
+    assert record.verdict == "nice"
+
+
+def test_edit_without_changes(repo: Repo, store: Store, ws, lgbm) -> None:
+    base = start(repo, store, ws)
+    head = store.view().commit
+    assert experiment.edit(store, "lgbm", base, edited_copy(base)) == (base, [])
+    assert store.view().commit == head
+
+
+def test_edit_keeps_concurrent_changes(repo: Repo, store: Store, ws, lgbm) -> None:
+    base = start(repo, store, ws)
+    # Someone else sets the public LB while this user edits the verdict.
+    other = edited_copy(base)
+    other.scores["public LB"] = "0.8"
+    experiment.edit(store, "lgbm", base, other)
+    record, _ = experiment.edit(store, "lgbm", base, edited_copy(base, verdict="v"))
+    assert record.scores["public LB"] == "0.8"
+    assert record.verdict == "v"
+
+
+def test_edit_conflict(repo: Repo, store: Store, ws, lgbm) -> None:
+    base = start(repo, store, ws)
+    experiment.edit(store, "lgbm", base, edited_copy(base, verdict="theirs"))
+    with pytest.raises(experiment.EditConflictError, match="verdict"):
+        experiment.edit(store, "lgbm", base, edited_copy(base, verdict="mine"))
+    # The same change on both sides is not a conflict.
+    experiment.edit(store, "lgbm", base, edited_copy(base, verdict="theirs"))
+
+
+def test_edit_removes_scores(repo: Repo, store: Store, ws, lgbm) -> None:
+    base = start(repo, store, ws)
+    new = edited_copy(base)
+    del new.scores["CV std"]
+    record, changed = experiment.edit(store, "lgbm", base, new)
+    assert changed == ["scores.CV std"]
+    assert list(record.scores) == ["CV", "public LB"]
+
+
+def test_edit_validates_parents(repo: Repo, store: Store, ws, lgbm) -> None:
+    first = start(repo, store, ws)
+    finish(repo, store, ws)
+    second = start(repo, store, ws, parents=["bjs-1"])
+    with pytest.raises(experiment.InvalidParentError, match="own parent"):
+        experiment.edit(store, "lgbm", second, edited_copy(second, parents=["bjs-2"]))
+    with pytest.raises(ParentNotFoundError):
+        experiment.edit(store, "lgbm", second, edited_copy(second, parents=["bjs-9"]))
+    first = experiment.load_record(store.view(), "lgbm", "bjs-1")
+    with pytest.raises(experiment.InvalidParentError, match="cycle"):
+        experiment.edit(store, "lgbm", first, edited_copy(first, parents=["bjs-2"]))
+    with pytest.raises(InvalidTitleError):
+        experiment.edit(store, "lgbm", second, edited_copy(second, title=" "))

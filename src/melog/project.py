@@ -213,3 +213,27 @@ def resolve_project(
     if len(active) == 1:
         return active[0]
     raise AmbiguousProjectError(names)
+
+
+class OverviewConflictError(ProjectError):
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"the overview of {name!r} was changed elsewhere while you were editing it"
+        )
+
+
+def load_overview(view: StoreView, name: str) -> str:
+    load_project(view, name)
+    return view.read(overview_path(name)) or ""
+
+
+def save_overview(store: Store, name: str, base: str, text: str) -> None:
+    """Replace the overview, unless someone else changed it after ``base`` was read."""
+
+    def build(view: StoreView) -> tuple[dict[str, str | None], str]:
+        if load_overview(view, name) != base:
+            raise OverviewConflictError(name)
+        changes: dict[str, str | None] = {overview_path(name): text}
+        return changes, f"edit overview of {name}"
+
+    store.update(build)

@@ -162,6 +162,31 @@ def _time_scalar(value: str | None) -> _Tagged | None:
     return None if value is None else _Tagged(value, TIMESTAMP_TAG)
 
 
+def dump_yaml(data: Mapping[str, object]) -> str:
+    buf = io.StringIO()
+    _yaml().dump(dict(data), buf)
+    return buf.getvalue()
+
+
+def editable_data(record: Record) -> dict[str, object]:
+    """The frontmatter fields a user may change, ready to be dumped."""
+    return {
+        "title": record.title,
+        "parents": list(record.parents),
+        "entry_points": list(record.entry_points),
+        "scores": {name: _score_scalar(v) for name, v in record.scores.items()},
+        "verdict": record.verdict,
+    }
+
+
+def dump_body(record: Record) -> str:
+    parts = []
+    for name in SECTIONS:
+        text = record.section(name).strip("\n")
+        parts.append(f"## {name}\n" + (f"\n{text}\n" if text else ""))
+    return "\n".join(parts)
+
+
 def dump_record(record: Record) -> str:
     data: dict[str, object] = {
         "id": record.id,
@@ -174,22 +199,10 @@ def dump_record(record: Record) -> str:
     }
     if record.origin is not None:
         data["origin"] = record.origin.to_dict()
-    data.update(
-        {
-            "parents": list(record.parents),
-            "entry_points": list(record.entry_points),
-            "scores": {name: _score_scalar(v) for name, v in record.scores.items()},
-            "verdict": record.verdict,
-        }
-    )
-    buf = io.StringIO()
-    _yaml().dump(data, buf)
-
-    parts = []
-    for name in SECTIONS:
-        text = record.section(name).strip("\n")
-        parts.append(f"## {name}\n" + (f"\n{text}\n" if text else ""))
-    return f"---\n{buf.getvalue()}---\n\n" + "\n".join(parts)
+    editable = editable_data(record)
+    del editable["title"]  # already placed right after the id
+    data.update(editable)
+    return f"---\n{dump_yaml(data)}---\n\n" + dump_body(record)
 
 
 def _optional_str(data: Mapping[str, object], key: str) -> str | None:
@@ -204,6 +217,48 @@ def _str_list(data: Mapping[str, object], key: str) -> list[str]:
     if not isinstance(value, list):
         raise RecordError(f"{key} must be a list")
     return [str(item) for item in value]
+
+
+def split_frontmatter(text: str) -> tuple[dict, str]:
+    """Return the frontmatter as a mapping and the text that follows it."""
+    match = FRONTMATTER_PATTERN.match(text)
+    if match is None:
+        raise RecordError("the document must start with a '---' frontmatter block")
+    try:
+        data = _yaml().load(match.group(1))
+    except YAMLError as e:
+        raise RecordError(f"cannot parse frontmatter: {e}") from e
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        raise RecordError("frontmatter must be a mapping")
+    return data, text[match.end() :]
+
+
+def parse_scores(raw: object) -> dict[str, str | None]:
+    raw = raw or {}
+    if not isinstance(raw, dict):
+        raise RecordError("scores must be a mapping of names to numbers")
+    scores: dict[str, str | None] = {}
+    for name, value in raw.items():
+        scores[str(name)] = (
+            None if value is None or value == "" else normalize_score(name, str(value))
+        )
+    return scores
+
+
+def check_headings(body: str) -> None:
+    """Require each section heading exactly once, so no section is merged away."""
+    lines = [line.rstrip() for line in body.splitlines()]
+    problems = []
+    for name in SECTIONS:
+        count = lines.count(f"## {name}")
+        if count == 0:
+            problems.append(f"missing heading '## {name}'")
+        elif count > 1:
+            problems.append(f"heading '## {name}' appears {count} times")
+    if problems:
+        raise RecordError("; ".join(problems))
 
 
 def parse_body(text: str) -> dict[str, str]:
@@ -221,15 +276,7 @@ def parse_body(text: str) -> dict[str, str]:
 
 
 def parse_record(text: str) -> Record:
-    match = FRONTMATTER_PATTERN.match(text)
-    if match is None:
-        raise RecordError("record has no frontmatter")
-    try:
-        data = _yaml().load(match.group(1))
-    except YAMLError as e:
-        raise RecordError(f"cannot parse frontmatter: {e}") from e
-    if not isinstance(data, dict):
-        raise RecordError("frontmatter must be a mapping")
+    data, body = split_frontmatter(text)
 
     exp_id = _optional_str(data, "id")
     title = _optional_str(data, "title")
@@ -250,15 +297,6 @@ def parse_record(text: str) -> Record:
             snapshot=str(raw_origin["snapshot"]),
         )
 
-    raw_scores = data.get("scores") or {}
-    if not isinstance(raw_scores, dict):
-        raise RecordError("scores must be a mapping")
-    scores: dict[str, str | None] = {}
-    for name, value in raw_scores.items():
-        scores[str(name)] = (
-            None if value is None or value == "" else normalize_score(name, str(value))
-        )
-
     return Record(
         id=exp_id,
         title=title,
@@ -270,9 +308,9 @@ def parse_record(text: str) -> Record:
         origin=origin,
         parents=_str_list(data, "parents"),
         entry_points=_str_list(data, "entry_points"),
-        scores=scores,
+        scores=parse_scores(data.get("scores")),
         verdict=_optional_str(data, "verdict"),
-        body=parse_body(text[match.end() :]),
+        body=parse_body(body),
     )
 
 
