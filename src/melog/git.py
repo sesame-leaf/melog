@@ -49,7 +49,7 @@ def _run(
         raise GitError(args, -1, "git executable not found") from e
     if proc.returncode != 0:
         raise GitError(args, proc.returncode, proc.stderr.decode("utf-8", "replace"))
-    return proc.stdout.decode("utf-8")
+    return proc.stdout.decode("utf-8", "replace")
 
 
 @dataclass(frozen=True)

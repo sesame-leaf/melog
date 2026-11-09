@@ -71,3 +71,8 @@ def _large_untracked_files(repo: Repo) -> list[tuple[str, int]]:
         if size > LARGE_FILE_BYTES:
             result.append((name, size))
     return result
+
+
+def checkout_worktree(repo: Repo, commit: str, path: Path) -> None:
+    """Check out ``commit`` into a new git worktree at ``path``, detached."""
+    repo.run("worktree", "add", "--detach", str(path), commit)

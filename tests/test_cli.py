@@ -447,3 +447,78 @@ def test_project_edit_without_terminal(repo_path: Path, project: str) -> None:
     result = invoke("project", "edit")
     assert result.exit_code == 1
     assert "run in a terminal" in result.output
+
+
+# Code commands
+
+
+def test_diff_command(repo_path: Path, project: str) -> None:
+    invoke("start", "a")
+    (repo_path / "train.py").write_text("print('better')\n")
+    result = invoke("diff", "bjs-1")
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("# bjs-1 start -> work tree\n")
+    assert "+print('better')" in result.output
+
+    invoke("done")
+    result = invoke("diff", "bjs-1", "--stat")
+    assert result.exit_code == 0, result.output
+    assert "train.py  +1 -1  (modified)" in result.output
+    assert "1 file changed, +1 -1" in result.output
+
+    data = json.loads(invoke("diff", "bjs-1", "--json").output)
+    assert data["base"]["kind"] == "start_snapshot"
+    assert data["target"]["kind"] == "end_snapshot"
+    assert [f["path"] for f in data["files"]] == ["train.py"]
+
+    assert "No differences." in invoke("diff", "bjs-1", "missing.py").output
+
+
+def test_diff_entry_points(repo_path: Path, project: str) -> None:
+    (repo_path / "a.py").write_text("model = 'A'\n")
+    invoke("done", "--new", "a", "--entry", "a.py")
+    (repo_path / "b.py").write_text("model = 'B'\n")
+    invoke("done", "--new", "b", "--entry", "b.py", "--parent", "bjs-1")
+    result = invoke("diff", "bjs-2", "--against", "bjs-1", "--entry-points")
+    assert result.exit_code == 0, result.output
+    assert "-model = 'A'\n+model = 'B'\n" in result.output
+    result = invoke("diff", "bjs-2", "--entry-points")
+    assert result.exit_code == 1
+    assert "--against" in result.output
+    assert "start snapshot" in invoke("diff", "bjs-2").output
+
+
+def test_diff_uses_git_pager(repo_path: Path, project: str, monkeypatch) -> None:
+    invoke("start", "a")
+    (repo_path / "train.py").write_text("print('paged')\n")
+    out = repo_path.parent / "paged.txt"
+    monkeypatch.setattr("melog.cli._stdout_is_tty", lambda: True)
+    monkeypatch.setenv("GIT_PAGER", f"cat > {out}")
+    result = invoke("diff", "bjs-1")
+    assert result.exit_code == 0, result.output
+    paged = out.read_text()
+    assert "print('paged')" in paged
+    assert "\x1b[" in paged  # colored for the terminal
+
+
+def test_checkout_command(repo_path: Path, project: str) -> None:
+    invoke("start", "a")
+    (repo_path / "train.py").write_text("print('v2')\n")
+    invoke("done")
+    target = repo_path.parent / "co"
+    result = invoke("checkout", "bjs-1", str(target))
+    assert result.exit_code == 0, result.output
+    assert "Checked out the end of bjs-1 into" in result.output
+    assert "git worktree remove" in result.output
+    assert (target / "train.py").read_text() == "print('v2')\n"
+    result = invoke("checkout", "bjs-1", str(target))
+    assert result.exit_code == 1
+    assert "already exists" in result.output
+
+    data = json.loads(
+        invoke(
+            "checkout", "bjs-1", str(repo_path.parent / "co2"), "--start", "--json"
+        ).output
+    )
+    assert data["snapshot"] == "start"
+    assert (Path(data["path"]) / "train.py").read_text() == "print('train')\n"

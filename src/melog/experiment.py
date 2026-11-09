@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 
 from melog.git import Repo
 from melog.ids import id_sort_key, next_id, parse_id
@@ -21,7 +22,13 @@ from melog.record import (
     record_path,
     records_dir,
 )
-from melog.snapshot import SNAPSHOT_REF_PREFIX, keep, snapshot_ref, take_snapshot
+from melog.snapshot import (
+    SNAPSHOT_REF_PREFIX,
+    checkout_worktree,
+    keep,
+    snapshot_ref,
+    take_snapshot,
+)
 from melog.store import Store, StoreView
 from melog.workspace import Active, Workspace
 
@@ -491,3 +498,46 @@ def edit(
 
     store.update(build)
     return result[0], changed
+
+
+# Checking out code
+
+
+class NoSnapshotError(ExperimentError):
+    """The experiment has no snapshot of the requested kind."""
+
+
+class CheckoutPathExistsError(ExperimentError):
+    def __init__(self, path: Path) -> None:
+        super().__init__(f"{path} already exists; choose another path")
+
+
+def checkout(
+    repo: Repo,
+    view: StoreView,
+    project: str,
+    exp_id: str,
+    path: Path | None = None,
+    start: bool = False,
+) -> tuple[Path, str]:
+    """Check out the code of an experiment into a new worktree.
+
+    Returns the path and the snapshot commit.
+    """
+    record = load_record(view, project, exp_id)
+    commit = record.start_snapshot if start else record.end_snapshot
+    if commit is None:
+        if not start and record.status == "in_progress":
+            raise NoSnapshotError(
+                f"{exp_id!r} is still in progress and has no end snapshot; pass "
+                "--start to check out the code it started from"
+            )
+        kind = "start" if start else "end"
+        raise NoSnapshotError(f"{exp_id!r} has no {kind} snapshot")
+    if path is None:
+        path = repo.root.parent / f"{repo.root.name}-{exp_id}"
+    path = path.resolve()
+    if path.exists():
+        raise CheckoutPathExistsError(path)
+    checkout_worktree(repo, commit, path)
+    return path, commit
