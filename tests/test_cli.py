@@ -212,7 +212,7 @@ def test_initials_required_without_terminal(repo_path: Path) -> None:
 
 
 def test_interactive_prompts(repo_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr("melog.cli._stdin_is_tty", lambda: True)
+    monkeypatch.setattr("melog.cli.common.stdin_is_tty", lambda: True)
     invoke("init", "lgbm")
     # Initials (first invalid), title, motivation.
     result = invoke("start", input="BJS\nbjs\nbaseline\nwhy not\n")
@@ -232,7 +232,7 @@ def test_interactive_prompts(repo_path: Path, monkeypatch) -> None:
 def test_done_checks_before_prompting(
     repo_path: Path, project: str, monkeypatch
 ) -> None:
-    monkeypatch.setattr("melog.cli._stdin_is_tty", lambda: True)
+    monkeypatch.setattr("melog.cli.common.stdin_is_tty", lambda: True)
     result = invoke("done", input="0.8\n")
     assert result.exit_code == 1
     assert "(Enter to skip)" not in result.output
@@ -267,7 +267,7 @@ class FakeEditor:
 
 @pytest.fixture
 def tty(monkeypatch) -> None:
-    monkeypatch.setattr("melog.cli._stdin_is_tty", lambda: True)
+    monkeypatch.setattr("melog.cli.common.stdin_is_tty", lambda: True)
 
 
 def record_json(exp_id: str = "bjs-1") -> dict:
@@ -353,7 +353,7 @@ def test_edit_in_editor(repo_path: Path, project: str, tty, monkeypatch) -> None
             "## 변경점\n", "## 변경점\n\nmore trees\n"
         )
     )
-    monkeypatch.setattr("melog.cli.run_editor", editor)
+    monkeypatch.setattr("melog.cli.editing.run_editor", editor)
     result = invoke("edit")
     assert result.exit_code == 0, result.output
     assert result.output == "Updated bjs-1: verdict, 변경점\n"
@@ -372,9 +372,9 @@ def test_edit_in_editor_unchanged_and_cancelled(
     repo_path: Path, project: str, tty, monkeypatch
 ) -> None:
     invoke("start", "a", "--motivation", "")
-    monkeypatch.setattr("melog.cli.run_editor", FakeEditor(lambda t: t))
+    monkeypatch.setattr("melog.cli.editing.run_editor", FakeEditor(lambda t: t))
     assert invoke("edit").output == "No changes.\n"
-    monkeypatch.setattr("melog.cli.run_editor", FakeEditor(lambda t: ""))
+    monkeypatch.setattr("melog.cli.editing.run_editor", FakeEditor(lambda t: ""))
     assert invoke("edit").output == "Edit cancelled.\n"
 
 
@@ -386,7 +386,7 @@ def test_edit_in_editor_retries_invalid_edits(
         lambda t: t.replace("verdict:", "verdic: typo"),
         lambda t: t.replace("verdic: typo", "verdict: fixed"),
     )
-    monkeypatch.setattr("melog.cli.run_editor", editor)
+    monkeypatch.setattr("melog.cli.editing.run_editor", editor)
     result = invoke("edit", input="y\n")
     assert result.exit_code == 0, result.output
     assert "unknown field 'verdic'" in result.output
@@ -400,7 +400,7 @@ def test_edit_in_editor_keeps_text_when_giving_up(
 ) -> None:
     invoke("start", "a", "--motivation", "")
     monkeypatch.setattr(
-        "melog.cli.run_editor", FakeEditor(lambda t: t.replace("verdict:", "x: 1"))
+        "melog.cli.editing.run_editor", FakeEditor(lambda t: t.replace("verdict:", "x: 1"))
     )
     result = invoke("edit", input="n\n")
     assert result.exit_code == 1
@@ -418,7 +418,7 @@ def test_edit_in_editor_conflict(
         assert invoke("edit", "--verdict", "theirs").exit_code == 0
         return text.replace("verdict:", "verdict: mine")
 
-    monkeypatch.setattr("melog.cli.run_editor", FakeEditor(change_meanwhile))
+    monkeypatch.setattr("melog.cli.editing.run_editor", FakeEditor(change_meanwhile))
     result = invoke("edit")
     assert result.exit_code == 1
     assert "was changed elsewhere" in result.output
@@ -432,7 +432,7 @@ def test_project_overview_in_editor(
     repo_path: Path, project: str, tty, monkeypatch
 ) -> None:
     monkeypatch.setattr(
-        "melog.cli.run_editor", FakeEditor(lambda t: "# Titanic\n\n5-fold CV\n")
+        "melog.cli.editing.run_editor", FakeEditor(lambda t: "# Titanic\n\n5-fold CV\n")
     )
     result = invoke("project", "edit")
     assert result.exit_code == 0, result.output
@@ -494,7 +494,7 @@ def test_diff_uses_git_pager(repo_path: Path, project: str, monkeypatch) -> None
     invoke("start", "a")
     (repo_path / "train.py").write_text("print('paged')\n")
     out = repo_path.parent / "paged.txt"
-    monkeypatch.setattr("melog.cli._stdout_is_tty", lambda: True)
+    monkeypatch.setattr("melog.cli.code_cmds._stdout_is_tty", lambda: True)
     monkeypatch.setenv("GIT_PAGER", f"cat > {out}")
     result = invoke("diff", "bjs-1")
     assert result.exit_code == 0, result.output
@@ -621,7 +621,7 @@ def test_sync_conflicts(
     assert "lgbm/bjs-1 verdict" in result.output
     assert "--prefer" in result.output
 
-    monkeypatch.setattr("melog.cli._stdin_is_tty", lambda: True)
+    monkeypatch.setattr("melog.cli.common.stdin_is_tty", lambda: True)
     result = invoke("sync", input="x\nr\n")
     assert result.exit_code == 0, result.output
     assert "Conflict in lgbm/bjs-1, verdict:" in result.output
