@@ -57,19 +57,31 @@ class Store:
     def view(self) -> StoreView:
         return StoreView(self.repo, self.repo.resolve(f"{self.ref}^{{commit}}"))
 
-    def commit(self, changes: Changes, message: str, base: StoreView) -> str:
+    def commit(
+        self,
+        changes: Changes,
+        message: str,
+        base: StoreView,
+        merge_with: str | None = None,
+    ) -> str:
         """Apply ``changes`` on top of ``base`` and move the store ref to the result.
 
+        With ``merge_with``, the new commit also has that commit as a parent, which
+        records a merge with another history of the store.
         Raises ConcurrentUpdateError if the store no longer points at ``base``.
         Returns the new store commit, or the base commit if nothing changed.
         """
         tree = self._write_tree(changes, base.commit)
-        if base.commit is not None and tree == self.repo.resolve(
-            f"{base.commit}^{{tree}}"
+        if (
+            merge_with is None
+            and base.commit is not None
+            and tree == self.repo.resolve(f"{base.commit}^{{tree}}")
         ):
             return base.commit
 
         parent_args = ["-p", base.commit] if base.commit else []
+        if merge_with is not None:
+            parent_args += ["-p", merge_with]
         new = self.repo.run(
             "commit-tree",
             tree,

@@ -342,3 +342,55 @@ def find_cycle(parents_of: Mapping[str, Iterable[str]]) -> list[str] | None:
         if cycle:
             return cycle
     return None
+
+
+# Comparing records field by field, for merging concurrent changes.
+
+MISSING = object()
+"""The value of a field that a record does not have, such as an unset score."""
+
+FACT_KEYS = (
+    "status",
+    "started_at",
+    "ended_at",
+    "start_snapshot",
+    "end_snapshot",
+    "origin",
+)
+
+
+def record_fields(record: Record, facts: bool = False) -> dict[str, object]:
+    """The parts of a record that are compared on their own when merging.
+
+    Scores are compared per name and the body per section. With ``facts``, the
+    values recorded by melog are included too.
+    """
+    fields: dict[str, object] = {
+        "title": record.title,
+        "parents": tuple(record.parents),
+        "entry_points": tuple(record.entry_points),
+        "verdict": record.verdict,
+    }
+    for name, value in record.scores.items():
+        fields[f"scores.{name}"] = value
+    for name in SECTIONS:
+        fields[f"body.{name}"] = record.section(name)
+    if facts:
+        for key in FACT_KEYS:
+            fields[key] = getattr(record, key)
+    return fields
+
+
+def set_record_field(record: Record, key: str, value: object) -> None:
+    if key.startswith("scores."):
+        name = key.removeprefix("scores.")
+        if value is MISSING:
+            record.scores.pop(name, None)
+        else:
+            record.scores[name] = value  # type: ignore[assignment]
+    elif key.startswith("body."):
+        record.body[key.removeprefix("body.")] = value  # type: ignore[assignment]
+    elif key in ("parents", "entry_points"):
+        setattr(record, key, list(value))  # type: ignore[arg-type]
+    else:
+        setattr(record, key, value)

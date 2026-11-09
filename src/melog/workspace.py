@@ -43,3 +43,21 @@ class Workspace:
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
         tmp.replace(self.path)
+
+
+def rename_everywhere(repo: Repo, project: str, old_id: str, new_id: str) -> None:
+    """Rename an experiment in the state of every worktree of this clone."""
+    common = Path(repo.run("rev-parse", "--git-common-dir").strip())
+    if not common.is_absolute():
+        common = repo.root / common
+    for path in [common / STATE_FILE, *(common / "worktrees").glob(f"*/{STATE_FILE}")]:
+        if not path.exists():
+            continue
+        data = json.loads(path.read_text(encoding="utf-8"))
+        changed = False
+        for item in data.get("active", []):
+            if item["project"] == project and item["id"] == old_id:
+                item["id"] = new_id
+                changed = True
+        if changed:
+            path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")

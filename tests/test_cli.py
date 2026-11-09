@@ -6,6 +6,8 @@ from typer.testing import CliRunner
 
 from melog.cli import app
 
+from .conftest import git
+
 runner = CliRunner()
 
 
@@ -552,3 +554,87 @@ def test_import_checks_before_prompting(repo_path: Path, project: str, tty) -> N
     assert result.exit_code == 1
     assert "does not exist" in result.output
     assert "Motivation" not in result.output
+
+
+# Collaboration
+
+
+@pytest.fixture
+def remote(tmp_path: Path, repo_path: Path, project: str) -> Path:
+    bare = tmp_path / "remote.git"
+    git(tmp_path, "init", "-q", "--bare", str(bare))
+    git(repo_path, "remote", "add", "origin", str(bare))
+    git(repo_path, "push", "-q", "origin", "main")
+    return bare
+
+
+def test_sync_command(repo_path: Path, remote: Path) -> None:
+    invoke("start", "a")
+    invoke("done")
+    result = invoke("sync")
+    assert result.exit_code == 1
+    assert "--yes" in result.output
+
+    result = invoke("sync", "--yes")
+    assert result.exit_code == 0, result.output
+    assert result.output == "Synced with origin.\n  sent:     lgbm/bjs-1\n"
+    assert invoke("sync").output == "Already in sync with origin.\n"
+    data = json.loads(invoke("sync", "--json").output)
+    assert data["remote"] == "origin"
+    assert data["sent"] == []
+
+
+def test_sync_asks_on_first_upload(repo_path: Path, remote: Path, tty) -> None:
+    (repo_path / "notes.txt").write_text("private\n")
+    invoke("start", "a", "--motivation", "")
+    result = invoke("sync", input="n\n")
+    assert result.exit_code == 1
+    assert "notes.txt" in result.output
+    assert "Sync cancelled. Nothing was uploaded." in result.output
+    result = invoke("sync", input="y\n")
+    assert result.exit_code == 0, result.output
+    assert "sent:     lgbm/bjs-1" in result.output
+
+
+def test_sync_conflicts(
+    repo_path: Path, tmp_path: Path, remote: Path, monkeypatch
+) -> None:
+    invoke("start", "a")
+    invoke("done")
+    invoke("sync", "--yes")
+    other = tmp_path / "other"
+    git(tmp_path, "clone", "-q", str(remote), str(other))
+    git(other, "config", "user.name", "Other")
+    git(other, "config", "user.email", "other@example.com")
+    monkeypatch.chdir(other)
+    assert (
+        invoke("sync", "--yes").output
+        == "Synced with origin.\n  received: lgbm/bjs-1\n"
+    )
+    invoke("edit", "bjs-1", "--verdict", "theirs")
+    invoke("sync")
+    monkeypatch.chdir(repo_path)
+    invoke("edit", "bjs-1", "--verdict", "mine")
+
+    result = invoke("sync")
+    assert result.exit_code == 1
+    assert "lgbm/bjs-1 verdict" in result.output
+    assert "--prefer" in result.output
+
+    monkeypatch.setattr("melog.cli._stdin_is_tty", lambda: True)
+    result = invoke("sync", input="x\nr\n")
+    assert result.exit_code == 0, result.output
+    assert "Conflict in lgbm/bjs-1, verdict:" in result.output
+    assert "local:   mine" in result.output
+    assert "remote:  theirs" in result.output
+    assert "resolved: lgbm/bjs-1 verdict (kept remote)" in result.output
+    assert record_json()["verdict"] == "theirs"
+
+
+def test_sync_errors(repo_path: Path, project: str) -> None:
+    result = invoke("sync")
+    assert result.exit_code == 1
+    assert "no git remote named 'origin'" in result.output
+    result = invoke("sync", "--prefer", "both")
+    assert result.exit_code == 1
+    assert "--prefer expects" in result.output

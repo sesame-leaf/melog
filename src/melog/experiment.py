@@ -11,8 +11,8 @@ from melog.git import Repo
 from melog.ids import id_sort_key, next_id, parse_id
 from melog.project import Project, load_project
 from melog.record import (
+    MISSING,
     MOTIVATION,
-    SECTIONS,
     Origin,
     Record,
     RecordError,
@@ -20,8 +20,10 @@ from melog.record import (
     find_cycle,
     now,
     parse_record,
+    record_fields,
     record_path,
     records_dir,
+    set_record_field,
 )
 from melog.snapshot import (
     SNAPSHOT_REF_PREFIX,
@@ -413,39 +415,6 @@ class InvalidParentError(ExperimentError):
     """A parent would point at the experiment itself or close a cycle."""
 
 
-def _fields(record: Record) -> dict[str, object]:
-    """The user-editable parts of a record, each compared on its own when merging."""
-    fields: dict[str, object] = {
-        "title": record.title,
-        "parents": tuple(record.parents),
-        "entry_points": tuple(record.entry_points),
-        "verdict": record.verdict,
-    }
-    for name, value in record.scores.items():
-        fields[f"scores.{name}"] = value
-    for name in SECTIONS:
-        fields[f"body.{name}"] = record.section(name)
-    return fields
-
-
-_MISSING = object()
-
-
-def _set_field(record: Record, key: str, value: object) -> None:
-    if key.startswith("scores."):
-        name = key.removeprefix("scores.")
-        if value is _MISSING:
-            record.scores.pop(name, None)
-        else:
-            record.scores[name] = value  # type: ignore[assignment]
-    elif key.startswith("body."):
-        record.body[key.removeprefix("body.")] = value  # type: ignore[assignment]
-    elif key in ("parents", "entry_points"):
-        setattr(record, key, list(value))  # type: ignore[arg-type]
-    else:
-        setattr(record, key, value)
-
-
 def _check_edited(view: StoreView, project: str, record: Record) -> None:
     _check_title(record.title)
     if record.id in record.parents:
@@ -468,11 +437,11 @@ def edit(
     Only the fields the user changed are applied, so concurrent changes to other
     fields are kept. Returns the stored record and the changed field names.
     """
-    before, after = _fields(base), _fields(edited)
+    before, after = record_fields(base), record_fields(edited)
     changed = [
         key
         for key in dict.fromkeys([*before, *after])
-        if before.get(key, _MISSING) != after.get(key, _MISSING)
+        if before.get(key, MISSING) != after.get(key, MISSING)
     ]
     if not changed:
         return base, []
@@ -481,17 +450,17 @@ def edit(
 
     def build(view: StoreView):
         current = load_record(view, project, base.id)
-        now_fields = _fields(current)
+        now_fields = record_fields(current)
         conflicts = [
             key
             for key in changed
-            if now_fields.get(key, _MISSING) != before.get(key, _MISSING)
-            and now_fields.get(key, _MISSING) != after.get(key, _MISSING)
+            if now_fields.get(key, MISSING) != before.get(key, MISSING)
+            and now_fields.get(key, MISSING) != after.get(key, MISSING)
         ]
         if conflicts:
             raise EditConflictError(base.id, conflicts)
         for key in changed:
-            _set_field(current, key, after.get(key, _MISSING))
+            set_record_field(current, key, after.get(key, MISSING))
         _check_edited(view, project, current)
         result[:] = [current]
         changes = {record_path(project, base.id): dump_record(current)}
