@@ -400,7 +400,8 @@ def test_edit_in_editor_keeps_text_when_giving_up(
 ) -> None:
     invoke("start", "a", "--motivation", "")
     monkeypatch.setattr(
-        "melog.cli.editing.run_editor", FakeEditor(lambda t: t.replace("verdict:", "x: 1"))
+        "melog.cli.editing.run_editor",
+        FakeEditor(lambda t: t.replace("verdict:", "x: 1")),
     )
     result = invoke("edit", input="n\n")
     assert result.exit_code == 1
@@ -638,3 +639,51 @@ def test_sync_errors(repo_path: Path, project: str) -> None:
     result = invoke("sync", "--prefer", "both")
     assert result.exit_code == 1
     assert "--prefer expects" in result.output
+
+
+# Viewing
+
+
+def test_lineage_command(repo_path: Path, project: str) -> None:
+    assert "No experiments" in invoke("lineage").output
+    invoke("done", "--new", "base", "--score", "CV=0.8")
+    invoke("done", "--new", "child", "--parent", "bjs-1", "--score", "CV=0.9")
+    result = invoke("lineage")
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines() == [
+        "bjs-1     done  base   CV 0.8",
+        "└─ bjs-2  done  child  CV 0.9",
+    ]
+    lines = invoke("lineage", "--score", "CV std").output.splitlines()
+    assert lines[0].endswith("CV std -")
+    mermaid = invoke("lineage", "--mermaid").output
+    assert mermaid.startswith("graph LR\n")
+    assert "n_bjs_1 --> n_bjs_2" in mermaid
+    data = json.loads(invoke("lineage", "--json").output)
+    assert [e["parents"] for e in data["experiments"]] == [[], ["bjs-1"]]
+    assert data["score"] == "CV"
+
+
+def test_export_command(repo_path: Path, project: str) -> None:
+    invoke("start", "base", "--motivation", "why")
+    (repo_path / "train.py").write_text("print('v2')\n")
+    invoke("done", "--score", "CV=0.8")
+    invoke("start", "wip")
+    result = invoke("export")
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("# lgbm 실험 기록\n")
+    assert "### bjs-1 · base" in result.output
+    assert "### bjs-2 · wip" in result.output
+
+    out = repo_path.parent / "export.md"
+    result = invoke("export", "--status", "done", "--with-diffs", "-o", str(out))
+    assert result.exit_code == 0, result.output
+    assert result.output == f"Wrote 1 experiment of 'lgbm' to {out}.\n"
+    text = out.read_text()
+    assert "### bjs-2" not in text
+    assert "train.py  +1 -1  (modified)" in text
+
+    data = json.loads(invoke("export", "--json", "--with-diffs").output)
+    assert [e["id"] for e in data["experiments"]] == ["bjs-1", "bjs-2"]
+    assert "train.py" in data["experiments"][0]["diff_stat"]
+    assert data["project"]["name"] == "lgbm"

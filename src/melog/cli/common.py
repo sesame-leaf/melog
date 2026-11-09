@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import json
 import sys
-import unicodedata
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Annotated, NoReturn
 
 import typer
@@ -206,20 +204,6 @@ def prompt_scores(project: Project, scores: dict[str, str]) -> None:
 
 
 # Output
-
-
-def display_width(text: str) -> int:
-    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
-
-
-def pad(text: str, width: int) -> str:
-    return text + " " * (width - display_width(text))
-
-
-def format_time(value: str | None) -> str:
-    if value is None:
-        return "-"
-    return datetime.fromisoformat(value).astimezone().strftime("%Y-%m-%d %H:%M")
 
 
 def score_line(record: Record) -> str:

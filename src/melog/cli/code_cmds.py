@@ -17,13 +17,12 @@ from melog.cli.common import (
     Context,
     JsonOption,
     ProjectOption,
-    display_width,
     fail,
     handle_errors,
     open_context,
-    pad,
     print_json,
 )
+from melog.views import display_width, pad
 
 # Code commands
 
