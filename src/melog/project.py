@@ -193,8 +193,14 @@ def update_project(
     return result[0]
 
 
-def resolve_project(view: StoreView, name: str | None) -> str:
-    """Return the project to work on when the user may have omitted --project."""
+def resolve_project(
+    view: StoreView, name: str | None, active_projects: Iterable[str] = ()
+) -> str:
+    """Return the project to work on when the user may have omitted --project.
+
+    ``active_projects`` are the projects of the experiments in progress in the
+    current workspace; if they all belong to one project, that project is used.
+    """
     if name is not None:
         load_project(view, name)
         return name
@@ -203,4 +209,7 @@ def resolve_project(view: StoreView, name: str | None) -> str:
         raise NoProjectError()
     if len(names) == 1:
         return names[0]
+    active = sorted({p for p in active_projects if p in names})
+    if len(active) == 1:
+        return active[0]
     raise AmbiguousProjectError(names)

@@ -97,6 +97,23 @@ class Repo:
         out = self.try_run("config", "--get", key)
         return out.strip() if out else None
 
+    def git_dir(self) -> Path:
+        """The git directory of this work tree. Linked worktrees each have their own."""
+        return Path(self.run("rev-parse", "--absolute-git-dir").strip())
+
+    def git_path(self, name: str) -> Path:
+        """Absolute path of ``name`` inside the git directory, e.g. ``index``."""
+        path = Path(self.run("rev-parse", "--git-path", name).strip())
+        return path if path.is_absolute() else self.root / path
+
+    def commit_time(self, rev: str) -> str:
+        """Committer date of ``rev`` in strict ISO 8601 format."""
+        return self.run("show", "-s", "--format=%cI", rev).strip()
+
+    def refs(self, prefix: str) -> list[str]:
+        out = self.run("for-each-ref", "--format=%(refname)", prefix)
+        return out.split()
+
     def identity_env(self) -> dict[str, str]:
         """Environment that lets commit-tree work without a configured identity."""
         env: dict[str, str] = {}

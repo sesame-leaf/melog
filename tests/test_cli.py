@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from melog.cli import app
@@ -84,3 +85,170 @@ def test_project_edit_without_project(repo_path: Path) -> None:
     result = runner.invoke(app, ["project", "edit", "--horizontal"])
     assert result.exit_code == 1
     assert "melog init" in result.output
+
+
+# Recording commands
+
+
+def invoke(*args: str, input: str | None = None):
+    return runner.invoke(app, list(args), input=input)
+
+
+@pytest.fixture
+def project(repo_path: Path, initials: str) -> str:
+    assert invoke("init", "lgbm").exit_code == 0
+    return "lgbm"
+
+
+def test_start_done_show_list(repo_path: Path, project: str) -> None:
+    result = invoke("start", "LightGBM baseline", "--motivation", "first try")
+    assert result.exit_code == 0, result.output
+    assert "Started bjs-1: LightGBM baseline (lgbm)" in result.output
+    assert "melog done" in result.output
+
+    result = invoke("list")
+    assert result.exit_code == 0, result.output
+    lines = result.output.splitlines()
+    assert lines[0].split() == [
+        "ID",
+        "STATUS",
+        "TITLE",
+        "CV",
+        "CV",
+        "std",
+        "public",
+        "LB",
+    ]
+    assert lines[1].startswith("*")
+    assert "in_progress" in lines[1]
+
+    result = invoke(
+        "done", "--score", "CV=0.80", "--score", "AUC=0.9", "--verdict", "ok"
+    )
+    assert result.exit_code == 0, result.output
+    assert "Finished bjs-1" in result.output
+    assert "CV: 0.80" in result.output
+    assert "melog edit bjs-1" in result.output
+
+    result = invoke("show", "bjs-1")
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("bjs-1: LightGBM baseline\n")
+    assert "status:       done" in result.output
+    assert "AUC: 0.9" in result.output
+    assert "## 동기와 예상\n\nfirst try" in result.output
+
+    result = invoke("list", "--status", "in_progress")
+    assert result.output.strip() == "No in_progress experiments in project 'lgbm'."
+
+
+def test_json_output(repo_path: Path, project: str) -> None:
+    started = json.loads(invoke("start", "a", "--json").output)
+    assert started["experiment"]["id"] == "bjs-1"
+    assert started["experiment"]["project"] == "lgbm"
+    assert started["experiment"]["status"] == "in_progress"
+    assert started["large_untracked_files"] == []
+
+    listed = json.loads(invoke("list", "--json").output)
+    assert listed["experiments"][0]["in_progress_here"] is True
+
+    done = json.loads(invoke("done", "--score", "CV=1e-3", "--json").output)
+    assert done["experiment"]["scores"]["CV"] == "1e-3"
+    shown = json.loads(invoke("show", "bjs-1", "--json").output)
+    assert shown["experiment"] == done["experiment"]
+
+
+def test_abandon_and_restart(repo_path: Path, project: str) -> None:
+    invoke("start", "a")
+    result = invoke("abandon", "--verdict", "no time")
+    assert result.exit_code == 0, result.output
+    assert "Abandoned bjs-1" in result.output
+    assert "--parent bjs-1" in result.output
+    result = invoke("start", "b", "--parent", "bjs-1")
+    assert result.exit_code == 0, result.output
+    assert "parents: bjs-1" in result.output
+
+
+def test_done_new(repo_path: Path, project: str) -> None:
+    result = invoke("done", "--new", "forgot", "--since", "HEAD", "--score", "CV=0.5")
+    assert result.exit_code == 0, result.output
+    assert "Recorded bjs-1: forgot (lgbm)" in result.output
+    shown = json.loads(invoke("show", "bjs-1", "--json").output)["experiment"]
+    assert shown["status"] == "done"
+    assert shown["start_snapshot"] is not None
+
+
+@pytest.mark.parametrize(
+    "args, message",
+    [
+        (["done", "bjs-1", "--new", "x"], "cannot be given an id"),
+        (["done", "--since", "HEAD"], "can only be used with --new"),
+        (["done", "--new", "x", "--force"], "--force cannot be used"),
+        (["done", "--score", "CV"], "NAME=VALUE"),
+        (["done"], "no experiment is in progress"),
+        (["list", "--status", "finished"], "unknown status"),
+        (["show", "bjs-9"], "does not exist"),
+        (["start", "x", "--parent", "bjs-9"], "parent experiments not found"),
+    ],
+)
+def test_recording_errors(repo_path: Path, project: str, args, message) -> None:
+    result = invoke(*args)
+    assert result.exit_code != 0
+    assert message in result.output
+
+
+def test_busy_workspace(repo_path: Path, project: str) -> None:
+    invoke("start", "a")
+    result = invoke("start", "b")
+    assert result.exit_code == 1
+    assert "already has an experiment in progress: bjs-1 (lgbm)" in result.output
+
+
+def test_start_requires_title_without_terminal(repo_path: Path, project: str) -> None:
+    result = invoke("start")
+    assert result.exit_code == 1
+    assert "missing the title" in result.output
+
+
+def test_initials_required_without_terminal(repo_path: Path) -> None:
+    invoke("init", "lgbm")
+    result = invoke("start", "a")
+    assert result.exit_code == 1
+    assert "git config --global melog.initials" in result.output
+
+
+def test_interactive_prompts(repo_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("melog.cli._stdin_is_tty", lambda: True)
+    invoke("init", "lgbm")
+    # Initials (first invalid), title, motivation.
+    result = invoke("start", input="BJS\nbjs\nbaseline\nwhy not\n")
+    assert result.exit_code == 0, result.output
+    assert "invalid initials" in result.output
+    assert "Started bjs-1: baseline" in result.output
+    # CV (first invalid), CV std skipped, public LB, verdict.
+    result = invoke("done", input="high\n0.8\n\n0.79\nfine\n")
+    assert result.exit_code == 0, result.output
+    assert "must be a number" in result.output
+    shown = json.loads(invoke("show", "bjs-1", "--json").output)["experiment"]
+    assert shown["scores"] == {"CV": "0.8", "CV std": None, "public LB": "0.79"}
+    assert shown["verdict"] == "fine"
+    assert shown["body"]["동기와 예상"] == "why not"
+
+
+def test_done_checks_before_prompting(
+    repo_path: Path, project: str, monkeypatch
+) -> None:
+    monkeypatch.setattr("melog.cli._stdin_is_tty", lambda: True)
+    result = invoke("done", input="0.8\n")
+    assert result.exit_code == 1
+    assert "(Enter to skip)" not in result.output
+
+
+def test_project_inferred_from_experiment_in_progress(
+    repo_path: Path, project: str
+) -> None:
+    invoke("init", "bert")
+    assert invoke("start", "a").exit_code == 1  # two projects, nothing in progress
+    assert invoke("start", "a", "-p", "bert").exit_code == 0
+    result = invoke("done")
+    assert result.exit_code == 0, result.output
+    assert "(bert)" in result.output

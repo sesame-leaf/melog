@@ -43,3 +43,9 @@ def repo(repo_path: Path) -> Repo:
 @pytest.fixture
 def store(repo: Repo) -> Store:
     return Store(repo)
+
+
+@pytest.fixture
+def initials(repo_path: Path) -> str:
+    git(repo_path, "config", "--global", "melog.initials", "bjs")
+    return "bjs"
