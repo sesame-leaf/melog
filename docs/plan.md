@@ -37,7 +37,7 @@
   - 이 단계 이후: melog 프로젝트를 만들고 설정할 수 있습니다.
 - [x] **2. 핵심 기록**: `snapshot.py`, `record.py`, `ids.py`, `workspace.py`, `experiment.py`, `start`, `done`(`--new` 포함), `abandon`, `show`, `list`
   - 이 단계 이후: 혼자서 실험을 기록할 수 있습니다. 처음으로 실제 사용이 가능한 단계입니다.
-- [ ] **3. 편집**: `editor.py`, `edit`(에디터 방식과 옵션 방식), `project edit`(에디터 방식)
+- [x] **3. 편집**: `editor.py`, `edit`(에디터 방식과 옵션 방식), `project edit`(에디터 방식)
   - 이 단계 이후: 본문과 점수를 편하게 채우고 보강할 수 있습니다.
 - [ ] **4. 코드**: `diff`, `checkout`
   - 이 단계 이후: 변경점을 확인하고 실험 코드를 재현할 수 있습니다.
