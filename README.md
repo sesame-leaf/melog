@@ -2,7 +2,83 @@
 
 ML 실험을 하나씩 정형화된 형태로 기록하는 CLI 도구입니다.
 
-> 현재 설계 단계에 있습니다. 구현 설계는 [docs/design.md](docs/design.md)에서 다룹니다.
+> 기록 기능은 모두 구현되어 있고, 조회 기능(계보 보기, 실험 기록 모아 보기)은 설계하고 있습니다. 구현 설계는 [docs/design.md](docs/design.md), 구현 순서와 진행 상황은 [docs/plan.md](docs/plan.md)에서 다룹니다.
+
+## 설치
+
+git과 [uv](https://docs.astral.sh/uv/)가 필요합니다. Python 3.13 이상이 필요하지만, uv가 알아서 준비합니다.
+
+```bash
+# 저장소를 clone해 둔 경우
+uv tool install /path/to/melog
+
+# GitHub에서 바로 설치하는 경우
+uv tool install git+https://github.com/sesame-leaf/melog
+```
+
+설치하면 어느 디렉터리에서나 `melog` 명령을 쓸 수 있습니다. melog는 실험을 진행하는 저장소와 별개로 설치되므로, 실험 저장소가 uv를 쓰지 않아도 됩니다.
+
+## 빠른 시작
+
+실험을 진행하는 git 저장소 안에서 다음과 같이 씁니다.
+
+```bash
+# 1. melog 프로젝트를 만듭니다 (모델마다 하나씩 만들 수 있습니다)
+melog init lgbm
+
+# 2. 실험을 시작합니다. 이 시점의 코드가 시작 스냅샷으로 남습니다
+melog start "LightGBM baseline" --motivation "Discussion에서 본 설정으로 시작" --entry train.py
+
+# 3. 평소처럼 코드를 고치고 실행합니다. 커밋할지는 자유입니다
+
+# 4. 실험을 끝냅니다. 이 시점의 코드가 종료 스냅샷으로 남습니다
+melog done --score CV=0.812 --score "CV std=0.004" --verdict "베이스라인으로 쓸 만함"
+
+# 5. 무엇이 바뀌었는지 확인하고, 실험 기록의 본문을 채웁니다
+melog diff bjs-1
+melog edit bjs-1
+
+# 6. 지금까지의 실험을 봅니다
+melog list
+```
+
+처음 `melog start`를 실행하면 실험 id에 쓸 이니셜(예: `bjs`)을 묻습니다. 미리 정해 두려면 `git config --global melog.initials bjs`를 실행합니다.
+
+터미널에서 실행하면, 옵션으로 주지 않은 값(제목, 동기, 점수, 판정)을 차례로 묻습니다. 모든 질문은 Enter로 건너뛸 수 있습니다.
+
+## 명령어
+
+| 명령어 | 하는 일 |
+|---|---|
+| `melog init <이름>` | melog 프로젝트를 만듭니다 |
+| `melog project edit` | 옵션 없이 실행하면 프로젝트 개요를 에디터로 열고, `--scores`나 `--horizontal`을 주면 설정을 바꿉니다 |
+| `melog start [제목]` | 실험을 시작합니다 |
+| `melog done [ID]` | 실험을 끝냅니다. `--new <제목>`을 주면, 시작을 선언하지 않고 진행한 실험을 사후 등록합니다 |
+| `melog abandon [ID]` | 실험을 중단합니다. 중단한 실험도 기록으로 남습니다 |
+| `melog import <프로젝트>/<id>` | 다른 melog 프로젝트의 실험을 가져옵니다 |
+| `melog edit [ID]` | 옵션 없이 실행하면 실험 기록을 에디터로 열고, 옵션을 주면 지정한 항목만 고칩니다 |
+| `melog show ID` | 실험 기록 하나를 보여 줍니다 |
+| `melog list` | 실험 목록을 보여 줍니다 |
+| `melog diff ID` | 실험에서 바뀐 코드를 보여 줍니다. 노트북은 코드 셀만 비교합니다 |
+| `melog checkout ID [경로]` | 실험의 코드를 별도의 디렉터리(git worktree)에 꺼냅니다. 그 디렉터리에서 바로 새 실험을 시작할 수 있습니다 |
+| `melog sync` | 원격 저장소를 통해 실험 기록과 코드 스냅샷을 팀원과 공유합니다 |
+
+각 명령의 옵션은 `melog <명령어> --help`로 볼 수 있습니다. `done`, `abandon`, `edit`에서 ID를 생략하면, 이 작업 공간에서 진행 중인 실험을 대상으로 삼습니다.
+
+## 에이전트에서 쓰기
+
+melog는 사람과 에이전트가 같은 명령을 씁니다.
+
+- 모든 명령에 `--json`을 주면 기계가 읽을 수 있는 JSON을 출력합니다.
+- 터미널이 아니거나 `--json`을 주면 아무것도 묻지 않습니다. 필요한 값은 옵션으로 줍니다.
+- 본문은 `melog edit bjs-3 --changes - < summary.md`처럼 표준 입력으로 채울 수 있습니다.
+- 동기화할 때 충돌이 나면 아무것도 바꾸지 않고 종료합니다. `--prefer local` 또는 `--prefer remote`로 해결할 수 있습니다.
+
+## 알아 둘 점
+
+- **스냅샷에는 커밋하지 않은 파일도 들어갑니다.** git이 무시하지 않는 파일은 모두 스냅샷에 들어가고, `melog sync`를 실행하면 원격 저장소에도 올라갑니다. 데이터, 모델 가중치, 비밀 정보(`.env` 등)는 `.gitignore`에 넣어 두세요. 처음 동기화할 때는 올라갈 파일 목록을 보여 주고 확인을 받습니다.
+- **사용자의 브랜치와 커밋 이력은 바뀌지 않습니다.** melog는 실험 기록과 스냅샷을 전용 참조(`refs/melog/...`)에 저장합니다. 그래서 평소의 `git log`, `git push`에는 나타나지 않습니다. 다만 모든 참조를 보여 주는 `git log --all`에는 melog의 커밋도 함께 나타납니다.
+- **병렬로 실험하려면 작업 공간을 나눕니다.** 하나의 작업 공간에서는 진행 중인 실험을 하나만 둘 수 있습니다. `git worktree`로 작업 공간을 나누거나, 실험마다 파일이 분리되는 프로젝트라면 `melog init --horizontal`로 만듭니다.
 
 ## 만든 이유
 
