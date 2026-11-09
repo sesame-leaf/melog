@@ -13,6 +13,7 @@ from melog.project import Project, load_project
 from melog.record import (
     MOTIVATION,
     SECTIONS,
+    Origin,
     Record,
     RecordError,
     dump_record,
@@ -541,3 +542,85 @@ def checkout(
         raise CheckoutPathExistsError(path)
     checkout_worktree(repo, commit, path)
     return path, commit
+
+
+# Importing
+
+
+class ImportRefusedError(ExperimentError):
+    """The experiment cannot be imported into this project."""
+
+
+def _find_import(
+    view: StoreView, project: str, source_project: str, source_id: str
+) -> Record | None:
+    for record in list_records(view, project):
+        origin = record.origin
+        if origin and (origin.project, origin.id) == (source_project, source_id):
+            return record
+    return None
+
+
+def prepare_import(
+    view: StoreView, project: str, source_project: str, source_id: str
+) -> Record:
+    """Check that an experiment may be imported and return the original."""
+    if source_project == project:
+        raise ImportRefusedError(
+            f"{source_id!r} is already in project {project!r}; declare it as a "
+            f"parent with --parent {source_id} instead"
+        )
+    load_project(view, project)
+    load_project(view, source_project)
+    original = load_record(view, source_project, source_id)
+    if original.end_snapshot is None:
+        raise ImportRefusedError(
+            f"{source_project}/{source_id} is still in progress and has no end "
+            "snapshot to import"
+        )
+    existing = _find_import(view, project, source_project, source_id)
+    if existing is not None:
+        raise ImportRefusedError(
+            f"{source_project}/{source_id} was already imported as "
+            f"{existing.id}; use it as a parent with --parent {existing.id}"
+        )
+    return original
+
+
+def import_experiment(
+    repo: Repo,
+    store: Store,
+    project_name: str,
+    initials: str,
+    source_project: str,
+    source_id: str,
+    title: str | None = None,
+    motivation: str | None = None,
+) -> Outcome:
+    """Record an experiment of another project as a new one in this project."""
+    original = prepare_import(store.view(), project_name, source_project, source_id)
+    title = _check_title(title if title is not None else original.title)
+    created: list[Record] = []
+
+    def build(view: StoreView):
+        prepare_import(view, project_name, source_project, source_id)
+        project = load_project(view, project_name)
+        exp_id = next_id(initials, _used_ids(repo, view, project_name))
+        record = _new_record(
+            project, exp_id, title, [], motivation, original.entry_points
+        )
+        record.status = "done"
+        record.ended_at = now()
+        record.end_snapshot = original.end_snapshot
+        record.origin = Origin(source_project, source_id, original.end_snapshot)
+        created[:] = [record]
+        changes = {record_path(project_name, exp_id): dump_record(record)}
+        return (
+            changes,
+            f"import {source_project}/{source_id} as {project_name}/{exp_id}",
+        )
+
+    store.update(build)
+    record = created[0]
+    keep(repo, snapshot_ref(project_name, record.id, "end"), original.end_snapshot)
+    return Outcome(record)

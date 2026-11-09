@@ -522,3 +522,33 @@ def test_checkout_command(repo_path: Path, project: str) -> None:
     )
     assert data["snapshot"] == "start"
     assert (Path(data["path"]) / "train.py").read_text() == "print('train')\n"
+
+
+# Importing
+
+
+def test_import_command(repo_path: Path, project: str) -> None:
+    invoke("init", "ens")
+    invoke("start", "base", "-p", "lgbm")
+    invoke("done", "-p", "lgbm")
+    result = invoke("import", "lgbm/bjs-1", "-p", "ens", "--motivation", "stack it")
+    assert result.exit_code == 0, result.output
+    assert "Imported lgbm/bjs-1 into ens as bjs-1: base" in result.output
+    assert "--parent bjs-1" in result.output
+    shown = invoke("show", "bjs-1", "-p", "ens")
+    assert "origin:       lgbm/bjs-1" in shown.output
+
+    result = invoke("import", "lgbm/bjs-1", "-p", "ens", "--json")
+    assert result.exit_code == 1
+    assert "already imported" in result.output
+    result = invoke("import", "lgbm-bjs-1", "-p", "ens")
+    assert result.exit_code == 1
+    assert "expected PROJECT/ID" in result.output
+
+
+def test_import_checks_before_prompting(repo_path: Path, project: str, tty) -> None:
+    invoke("init", "ens")
+    result = invoke("import", "lgbm/bjs-9", "-p", "ens", input="why\n")
+    assert result.exit_code == 1
+    assert "does not exist" in result.output
+    assert "Motivation" not in result.output

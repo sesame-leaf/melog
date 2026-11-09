@@ -755,6 +755,58 @@ def edit(
         typer.echo("No changes.")
 
 
+@app.command("import")
+def import_command(
+    source: Annotated[
+        str,
+        typer.Argument(
+            metavar="PROJECT/ID", help="The experiment to import, e.g. lgbm/bjs-3."
+        ),
+    ],
+    title: Annotated[
+        str | None,
+        typer.Option("--title", help="A new title. Defaults to the original title."),
+    ] = None,
+    motivation: Annotated[
+        str | None,
+        typer.Option("--motivation", help="Why you import it into this project."),
+    ] = None,
+    project_name: ProjectOption = None,
+    json_output: JsonOption = False,
+) -> None:
+    """Import an experiment of another melog project as a new experiment."""
+    source_project, sep, source_id = source.partition("/")
+    if not sep or not source_project or not source_id:
+        _fail(f"expected PROJECT/ID, such as lgbm/bjs-3, got {source!r}")
+    interactive = _interactive(json_output)
+    ctx = _context()
+    with _errors():
+        project_id = ctx.project(project_name)
+        # Check before asking anything, so that the user never types in vain.
+        experiment.prepare_import(
+            ctx.store.view(), project_id, source_project, source_id
+        )
+        initials = _initials(ctx, interactive)
+        if motivation is None and interactive:
+            motivation = _prompt_optional("Motivation: why you import it")
+        outcome = experiment.import_experiment(
+            ctx.repo,
+            ctx.store,
+            project_id,
+            initials,
+            source_project,
+            source_id,
+            title=title,
+            motivation=motivation,
+        )
+    record = outcome.record
+    if json_output:
+        _print_json({"experiment": _experiment_json(project_id, record)})
+        return
+    typer.echo(f"Imported {source} into {project_id} as {record.id}: {record.title}")
+    typer.echo(f"Use it as a parent with 'melog start --parent {record.id}'.")
+
+
 # Reading commands
 
 

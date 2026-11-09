@@ -119,6 +119,10 @@ class Record:
     verdict: str | None = None
     body: dict[str, str] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        # Always hold every section, so that equal records compare equal.
+        self.body = {name: self.body.get(name, "") for name in SECTIONS}
+
     def section(self, name: str) -> str:
         return self.body.get(name, "")
 

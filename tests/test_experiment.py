@@ -313,3 +313,73 @@ def test_edit_validates_parents(repo: Repo, store: Store, ws, lgbm) -> None:
         experiment.edit(store, "lgbm", first, edited_copy(first, parents=["bjs-2"]))
     with pytest.raises(InvalidTitleError):
         experiment.edit(store, "lgbm", second, edited_copy(second, title=" "))
+
+
+# Importing
+
+
+@pytest.fixture
+def two_projects(repo_path: Path, repo: Repo, store: Store, ws):
+    create_project(store, "lgbm")
+    create_project(store, "ens", scores=["AUC"])
+    start(repo, store, ws, title="lgbm base", entry_points=["lgbm.py"])
+    (repo_path / "lgbm.py").write_text("model = 'lgbm'\n")
+    return finish(repo, store, ws, scores={"CV": "0.8"}, verdict="good")
+
+
+def import_(repo, store, source="lgbm", exp_id="bjs-1", **kwargs):
+    return experiment.import_experiment(
+        repo, store, "ens", "mj", source, exp_id, **kwargs
+    ).record
+
+
+def test_import(repo: Repo, store: Store, two_projects) -> None:
+    original = two_projects
+    record = import_(repo, store, motivation="for the ensemble")
+    assert record.id == "mj-1"
+    assert record.title == "lgbm base"
+    assert record.status == "done"
+    assert record.parents == []
+    assert record.entry_points == ["lgbm.py"]
+    assert record.start_snapshot is None
+    assert record.started_at is None
+    assert record.end_snapshot == original.end_snapshot
+    assert record.origin.to_dict() == {
+        "project": "lgbm",
+        "id": "bjs-1",
+        "snapshot": original.end_snapshot,
+    }
+    # Scores and judgments stay behind; this project's score names are ready.
+    assert record.scores == {"AUC": None}
+    assert record.verdict is None
+    assert record.body[MOTIVATION] == "for the ensemble"
+    assert repo.resolve(snapshot_ref("ens", "mj-1", "end")) == original.end_snapshot
+    assert experiment.load_record(store.view(), "ens", "mj-1") == record
+    # The original is untouched.
+    assert experiment.load_record(store.view(), "lgbm", "bjs-1") == original
+
+
+def test_import_with_title(repo: Repo, store: Store, two_projects) -> None:
+    assert import_(repo, store, title="LGBM for stacking").title == "LGBM for stacking"
+
+
+def test_import_refusals(repo: Repo, store: Store, ws, two_projects) -> None:
+    refused = experiment.ImportRefusedError
+    with pytest.raises(refused, match="declare it as a parent"):
+        experiment.import_experiment(repo, store, "lgbm", "bjs", "lgbm", "bjs-1")
+    with pytest.raises(ExperimentNotFoundError):
+        import_(repo, store, exp_id="bjs-9")
+    start(repo, store, ws, title="wip")
+    with pytest.raises(refused, match="still in progress"):
+        import_(repo, store, exp_id="bjs-2")
+    import_(repo, store)
+    with pytest.raises(refused, match="already imported as mj-1"):
+        import_(repo, store)
+
+
+def test_import_abandoned_while_busy(repo: Repo, store: Store, ws, two_projects):
+    start(repo, store, ws)
+    experiment.finish(repo, store, ws, "lgbm", None, "abandoned")
+    # An experiment in progress here does not block importing.
+    start(repo, store, ws)
+    assert import_(repo, store, exp_id="bjs-2").origin.id == "bjs-2"
